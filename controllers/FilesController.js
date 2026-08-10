@@ -9,16 +9,30 @@ const { ObjectId } = pkg;
 
 const ACCEPTED_TYPES = ['folder', 'file', 'image'];
 const ROOT_ID = '0';
+const PAGE_SIZE = 20;
+
+const getUserId = async (req) => {
+  const token = req.header('X-Token');
+
+  if (!token) {
+    return null;
+  }
+
+  return redisClient.get(`auth_${token}`);
+};
+
+const formatFile = (doc) => ({
+  id: doc._id.toString(),
+  userId: doc.userId.toString(),
+  name: doc.name,
+  type: doc.type,
+  isPublic: doc.isPublic || false,
+  parentId: doc.parentId === ROOT_ID || doc.parentId === 0 ? 0 : doc.parentId.toString(),
+});
 
 class FilesController {
   static async postUpload(req, res) {
-    const token = req.header('X-Token');
-
-    if (!token) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const userId = await redisClient.get(`auth_${token}`);
+    const userId = await getUserId(req);
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -98,6 +112,66 @@ class FilesController {
       });
     } catch (err) {
       return res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  static async getShow(req, res) {
+    const userId = await getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    try {
+      const file = await dbClient.db.collection('files').findOne({
+        _id: new ObjectId(req.params.id),
+        userId: new ObjectId(userId),
+      });
+
+      if (!file) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+
+      return res.status(200).json(formatFile(file));
+    } catch (err) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+  }
+
+  static async getIndex(req, res) {
+    const userId = await getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { parentId = 0 } = req.query;
+    const page = parseInt(req.query.page, 10) || 0;
+
+    const isRoot = parentId === 0 || parentId === ROOT_ID;
+
+    let parentMatch;
+
+    if (isRoot) {
+      parentMatch = ROOT_ID;
+    } else {
+      try {
+        parentMatch = new ObjectId(parentId);
+      } catch (err) {
+        return res.status(200).json([]);
+      }
+    }
+
+    try {
+      const files = await dbClient.db.collection('files').aggregate([
+        { $match: { userId: new ObjectId(userId), parentId: parentMatch } },
+        { $skip: page * PAGE_SIZE },
+        { $limit: PAGE_SIZE },
+      ]).toArray();
+
+      return res.status(200).json(files.map(formatFile));
+    } catch (err) {
+      return res.status(200).json([]);
     }
   }
 }
