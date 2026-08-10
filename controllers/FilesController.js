@@ -8,7 +8,8 @@ import redisClient from '../utils/redis';
 const { ObjectId } = pkg;
 
 const ACCEPTED_TYPES = ['folder', 'file', 'image'];
-const ROOT_ID = '0';
+const ROOT_ID = 0;
+const ROOT_MATCH = [0, '0'];
 const PAGE_SIZE = 20;
 
 const getUserId = async (req) => {
@@ -27,7 +28,7 @@ const formatFile = (doc) => ({
   name: doc.name,
   type: doc.type,
   isPublic: doc.isPublic || false,
-  parentId: doc.parentId === ROOT_ID || doc.parentId === 0 ? 0 : doc.parentId.toString(),
+  parentId: ROOT_MATCH.includes(doc.parentId) ? 0 : doc.parentId.toString(),
 });
 
 class FilesController {
@@ -58,7 +59,7 @@ class FilesController {
       return res.status(400).json({ error: 'Missing data' });
     }
 
-    const isRoot = parentId === 0 || parentId === ROOT_ID;
+    const isRoot = ROOT_MATCH.includes(parentId);
 
     try {
       const files = dbClient.db.collection('files');
@@ -148,12 +149,12 @@ class FilesController {
     const { parentId = 0 } = req.query;
     const page = parseInt(req.query.page, 10) || 0;
 
-    const isRoot = parentId === 0 || parentId === ROOT_ID;
+    const isRoot = ROOT_MATCH.includes(parentId);
 
     let parentMatch;
 
     if (isRoot) {
-      parentMatch = ROOT_ID;
+      parentMatch = { $in: ROOT_MATCH };
     } else {
       try {
         parentMatch = new ObjectId(parentId);
